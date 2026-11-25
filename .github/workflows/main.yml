@@ -1,0 +1,53 @@
+name: CI Spring Boot et Docker
+
+on: [push]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: spring-docker-demo:${{ github.sha }}
+
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v6
+
+      - name: Installer Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Compiler, tester et empaqueter
+        run: mvn -B clean package
+
+      - name: Construire l’image Docker
+        run: docker build --tag "$IMAGE" .
+
+      - name: Démarrer le conteneur
+        run: docker run -d --name demo -p 127.0.0.1:8080:8080 "$IMAGE"
+
+      - name: Vérifier GET /hello
+        run: |
+          for attempt in {1..30}; do
+            if response=$(curl -fsS --max-time 2 http://127.0.0.1:8080/hello 2>/dev/null) &&
+               [[ "$response" == 'Bonjour !' ]]; then
+              echo "Réponse attendue reçue : $response"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::GET /hello ne renvoie pas la réponse attendue"
+          exit 1
+
+      - name: Afficher les logs en cas d’échec
+        if: failure()
+        run: docker logs demo || true
+
+      - name: Supprimer le conteneur
+        if: always()
+        run: docker rm -f demo || true
